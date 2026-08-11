@@ -246,3 +246,35 @@ def rfe(df, id_col, target_col, xgb_parms):
     print(f"\nOptimal configuration: Keep {best_num} features for a peak CV score of {best_score:.5f}")
 
     return best_features
+
+def objective(trial):
+    xgb_parms = {
+        'max_depth': trial.suggest_int('max_depth', 3, 8),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),
+        'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1.0),
+        'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 50, log=True),
+        'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 10.0),
+        'min_child_weight': trial.suggest_int('min_child_weight', 1, 200, log=True),
+        'gamma': trial.suggest_float('gamma', 0.0, 5.0),
+
+        'eval_metric': 'logloss',
+        'objective': 'binary:logistic',
+        'tree_method': 'hist',
+        'device': 'cuda',
+        'random_state': 42,
+    }
+
+    _, _, overall_score = train_xgb_cv(
+        df=train_df,
+        FEATURES=FEATURES,
+        xgb_parms=xgb_parms,
+        n_splits=5,                 
+        num_boost_round=9999,
+        early_stopping_rounds=100,   
+        verbose_eval=False,             
+        save_dir='/kaggle/working/tuning_tmp',
+        model_version=f'trial_{trial.number}',
+    )
+
+    return overall_score
