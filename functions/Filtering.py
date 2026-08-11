@@ -32,9 +32,9 @@ def calculate_woe_iv(df, feature, target, is_continuous=False, bins=10):
     return total_iv, grouped
 
 
-def get_all_features_iv(df, target, max_bins=10, unique_threshold=10):
+def get_all_features_iv(df, target, id_col, max_bins=10, unique_threshold=10):
     iv_results = {}
-    cols_to_skip = [target, "customer_ID", "last_stmt_month", "first_stmt_month"]
+    cols_to_skip = [target, id_col, "last_stmt_month", "first_stmt_month"]
     
     for col in df.columns:
         if col in cols_to_skip:
@@ -290,7 +290,7 @@ def _create_summary(targets, feature_files, id_col, target_col):
 
     return master_stats_df
 
-def _merging(stats_df, file_path_map):
+def _merging(stats_df, file_path_map, id_col):
     required_cols = [
         c for c in ['IV', 'target_corr', 'missing_rate', 'csi_value'] if c in stats_df.columns
     ]
@@ -323,7 +323,7 @@ def _merging(stats_df, file_path_map):
         file_path = file_path_map[file_key]
         print(f'Processing {file_key}...')
 
-        cols_to_load = list(set(feature_list + ['customer_ID']))
+        cols_to_load = list(set(feature_list + [id_col]))
         chunk = pd.read_parquet(file_path, columns=cols_to_load)
         chunk = downcast_df(chunk)
         print(f'  -> {len(chunk)} rows, {len(feature_list)} feature(s)')
@@ -331,7 +331,7 @@ def _merging(stats_df, file_path_map):
         if final_df is None:
             final_df = chunk
         else:
-            final_df = final_df.merge(chunk, on='customer_ID', how='inner')
+            final_df = final_df.merge(chunk, on=id_col, how='inner')
 
     print(f'\nFinal shape: {final_df.shape}')
 
