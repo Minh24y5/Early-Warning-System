@@ -126,123 +126,41 @@ def filter_sgt_features(sgt_feats, id_col='customer_ID', target=None, var_thresh
 def process_and_feature_engineer(df, id_col, cat_features, front_cols, date_col):
     all_cols = [c for c in df.columns if c not in front_cols]
     num_features = [c for c in all_cols if c not in cat_features]
-    prefixes = ["D_", "S_", "P_", "B_", "R_"]
 
     df = df.sort_values([id_col, date_col])
     df[date_col] = pd.to_datetime(df[date_col])
-    df['month'] = train_df[date_col].dt.strftime("%Y-%m")
 
-    stmt_counts = (
-        df.groupby(id_col, sort=False)[date_col]
-        .count()
-        .rename('n_statements')
-        .reset_index()
-    )
+    agg_dict = {c: ['mean', 'std', 'min', 'max', 'last', 'first'] for c in num_features}
+    agg_dict.update({c: ['last', 'nunique'] for c in cat_features})
+    agg_dict[date_col] = ['first', 'last', 'count']
 
-    month_summary = (
-        df.groupby(id_col, sort=False)['month']
-        .agg(last_stmt_month='last', first_stmt_month='first')
-        .reset_index()
-    )
-
-    agg_dict = {c: "mean" for c in num_features}
-    agg_dict.update({c: "last" for c in cat_features})
-    agg_dict[date_col] = "last"
-    agg_dict['month'] = "last"
-
-    monthly_df = (
-        df.groupby(id_col, as_index=False, sort=False)
-        .agg(agg_dict)
-        .sort_values(id_col)
-        .reset_index(drop=True)
-    )
-    monthly_df = monthly_df[
-        front_cols + [c for c in monthly_df.columns if c not in front_cols]
-    ]
-
-    grouped = monthly_df.groupby(id_col, sort=False)
-    new_cols = {}
-    new_cols["n_missing_num"] = monthly_df[num_features].isna().sum(axis=1)
-    new_cols["pct_missing_num"] = new_cols["n_missing_num"] / max(len(num_features), 1)
-    prev_s2 = grouped[date_col].shift(1)
-    new_cols["days_since_prev_stmt"] = (pd.to_datetime(monthly_df[date_col]) - pd.to_datetime(prev_s2)).dt.days
-    new_cols["stmt_index"] = grouped.cumcount() + 1
-    new_cols["n_statements_total"] = grouped[date_col].transform('count')
-
-    cat_mean_cols = {}
-    for p in prefixes:
-        p_cols = [c for c in num_features if c.startswith(p)]
-        if p_cols:
-            col_name = f"{p}row_mean"
-            new_cols[col_name] = monthly_df[p_cols].mean(axis=1)
-            cat_mean_cols[p] = col_name
-    if "B_" in cat_mean_cols and "S_" in cat_mean_cols:
-        new_cols["B_over_S"] = new_cols[cat_mean_cols["B_"]] / new_cols[cat_mean_cols["S_"]].replace(0, np.nan)
-    if "P_" in cat_mean_cols and "B_" in cat_mean_cols:
-        new_cols["P_over_B"] = new_cols[cat_mean_cols["P_"]] / new_cols[cat_mean_cols["B_"]].replace(0, np.nan)
-    if "R_" in cat_mean_cols and "D_" in cat_mean_cols:
-        new_cols["R_times_D"] = new_cols[cat_mean_cols["R_"]] * new_cols[cat_mean_cols["D_"]]
-
-    for c in cat_features:
-        changed = (monthly_df[c] != grouped[c].shift(1)).astype(int)
-        is_first = new_cols["stmt_index"] == 1
-        changed[is_first] = 0
-        new_cols[f"{c}_changed"] = changed
-
-    monthly_df = pd.concat([monthly_df, pd.DataFrame(new_cols)], axis=1)
+    monthly_df = df.groupby(id_col, sort=False).agg(agg_dict)
+    monthly_df.columns = ['_'.join(col).strip('_') for col in monthly_df.columns]
+    monthly_df = monthly_df.reset_index()
     monthly_df = monthly_df.copy()
+    
+    derived = {}
+    derived[f'{date_col}_n_statements'] = monthly_df[f'{date_col}_count']
+    derived['tenure_days'] = (
+        monthly_df[f'{date_col}_last'] - monthly_df[f'{date_col}_first']
+    ).dt.days
 
-    summary_cols = {}
     for c in num_features:
-        cust_group = monthly_df.groupby(id_col, sort=False)[c]
-        mean_val = cust_group.transform('mean')
-        last_val = cust_group.transform('last')
-        first_val = cust_group.transform('first')
-        summary_cols[f"{c}_mean"] = mean_val
-        summary_cols[f"{c}_std"] = cust_group.transform('std')
-        summary_cols[f"{c}_min"] = cust_group.transform('min')
-        summary_cols[f"{c}_max"] = cust_group.transform('max')
-        summary_cols[f"{c}_last"] = last_val
-        summary_cols[f"{c}_last_minus_mean"] = last_val - mean_val
-        summary_cols[f"{c}_last_div_mean"] = last_val / mean_val.replace(0, np.nan)
-        summary_cols[f"{c}_last_minus_first"] = last_val - first_val
+        mean_val = monthly_df[f'{c}_mean']
+        last_val = monthly_df[f'{c}_last']
+        first_val = monthly_df[f'{c}_first']
+        derived[f'{c}_last_minus_mean'] = last_val - mean_val
+        derived[f'{c}_last_div_mean'] = last_val / mean_val.replace(0, np.nan)
+        derived[f'{c}_last_minus_first'] = last_val - first_val
 
-    for c in cat_features:
-        cust_group = monthly_df.groupby(id_col, sort=False)[c]
-        summary_cols[f"{c}_last_cat"] = cust_group.transform('last')
-        summary_cols[f"{c}_nunique_cat"] = cust_group.transform('nunique')
+    derived['n_missing_num'] = monthly_df[[f'{c}_mean' for c in num_features]].isna().sum(axis=1)
+    derived['pct_missing_num'] = derived['n_missing_num'] / max(len(num_features), 1)
 
-    flag_cols = [k for k in new_cols if k.endswith("_changed")]
-    skip_cols = {"stmt_index", "n_statements_total"} | set(flag_cols)
-    eng_summary_targets = [k for k in new_cols if k not in skip_cols]
+    monthly_df = pd.concat([monthly_df, pd.DataFrame(derived)], axis=1)
+    monthly_df = monthly_df.copy() 
 
-    for c in eng_summary_targets:
-        cust_group = monthly_df.groupby(id_col, sort=False)[c]
-        mean_val = cust_group.transform('mean')
-        last_val = cust_group.transform('last')
-        summary_cols[f"{c}_mean"] = mean_val
-        summary_cols[f"{c}_std"] = cust_group.transform('std')
-        summary_cols[f"{c}_max"] = cust_group.transform('max')
-        summary_cols[f"{c}_last"] = last_val
-
-    for c in flag_cols:
-        cust_group = monthly_df.groupby(id_col, sort=False)[c]
-        summary_cols[f"{c}_count"] = cust_group.transform('sum')
-        summary_cols[f"{c}_last"] = cust_group.transform('last')
-
-    summary_df = pd.concat(
-        [monthly_df[[id_col]], pd.DataFrame(summary_cols)],
-        axis=1
-    )
-    summary_df = summary_df.copy()
-    final_df = (
-        summary_df
-        .drop_duplicates(subset=id_col, keep='last')
-        .reset_index(drop=True)
-        .copy()
-    )
-
-    final_df = final_df.merge(stmt_counts, on=id_col, how='left')
-    final_df = final_df.merge(month_summary, on=id_col, how='left').copy()
+    front_present = [c for c in front_cols if c in monthly_df.columns]
+    other_cols = [c for c in monthly_df.columns if c not in front_present]
+    final_df = monthly_df[front_present + other_cols]
 
     return final_df
