@@ -144,6 +144,7 @@ def process_and_feature_engineer(df, id_col, cat_features, front_cols, date_col)
     derived['tenure_days'] = (
         monthly_df[f'{date_col}_last'] - monthly_df[f'{date_col}_first']
     ).dt.days
+    derived['first_stmt_month'] = monthly_df[f'{date_col}_first'].dt.strftime('%Y-%m')
 
     for c in num_features:
         mean_val = monthly_df[f'{c}_mean']
