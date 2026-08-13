@@ -41,7 +41,7 @@ def optimize_dtypes(df):
 
     return df
 
-def process_in_customer_chunks(df, sgt_feats, id_col, chunk_size=229500, save_dir):
+def process_in_customer_chunks(df, sgt_feats=None, id_col, chunk_size=229500, save_dir):
     os.makedirs(save_dir, exist_ok=True)
     unique_custs = df[id_col].unique()
     total_custs = len(unique_custs)
@@ -56,8 +56,9 @@ def process_in_customer_chunks(df, sgt_feats, id_col, chunk_size=229500, save_di
         df_chunk = df[df[id_col].isin(batch_cust_ids)].copy()
         processed_chunk = process_and_feature_engineer(df_chunk)
 
-        sgt_chunk = sgt_feats[sgt_feats[id_col].isin(batch_cust_ids)]
-        processed_chunk = processed_chunk.merge(sgt_chunk, on=id_col, how='left')
+        if sgt_feats:
+            sgt_chunk = sgt_feats[sgt_feats[id_col].isin(batch_cust_ids)]
+            processed_chunk = processed_chunk.merge(sgt_chunk, on=id_col, how='left')
 
         processed_chunk = optimize_dtypes(processed_chunk)
         chunk_file = os.path.join(save_dir, f"batch_{i+1}_of_{num_chunks}.parquet")
