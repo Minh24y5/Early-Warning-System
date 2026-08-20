@@ -116,7 +116,7 @@ def combine_batches_select_features(
 ):
     
     os.makedirs(output_dir, exist_ok=True)
-    batch_files = _list_batch_files(batch_dir)
+    batch_files = _list_batch_files(batch _dir)
  
     numeric_cols, other_cols = _get_schema_columns(batch_files[0])
     id_cols_present = [c for c in id_cols if c in numeric_cols or c in other_cols]
